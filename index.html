@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Trailer</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+  #p { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
+  #shield { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 2; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<div id="shield"></div>
+<script>
+/*
+ * A YouTube trailer full screen, for the TV app's IPTV pages (?v=<YouTube id>). YouTube plays embeds only inside an
+ * http(s) page it can see (a web app on the TV has none), so the app opens this one in a frame and hears back:
+ * {fmtv: 'playing' | 'ended' | 'error'}. It asks for {cmd: 'toggle'} (pause) and {cmd: 'stop'}. Plain ES5 (old TVs).
+ * It starts muted and slow, and says 'playing' only REVEAL ms later, at full speed and sound on: YouTube shows its pause
+ * button for the first seconds of a trailer started in a frame, and the app keeps the photo over it until then.
+ */
+var REVEAL = 4500;
+var id = (location.search.match(/[?&]v=([\w-]{6,20})/) || [])[1], player = null, revealing = false;
+
+function tell(what) { try { parent.postMessage({fmtv: what}, '*'); } catch (e) {} }
+
+if (!id) tell('error');
+else {
+  var api = document.createElement('script');
+  api.src = 'https://www.youtube.com/iframe_api';
+  api.onerror = function () { tell('error'); };
+  document.head.appendChild(api);
+}
+
+function onYouTubeIframeAPIReady() {
+  player = new YT.Player('p', {
+    videoId: id, width: '100%', height: '100%',
+    playerVars: {autoplay: 1, mute: 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, fs: 0,
+      disablekb: 1, cc_load_policy: 0, hl: 'pt-BR'},
+    events: {
+      onReady: function (e) {
+        try { e.target.unloadModule('captions'); e.target.unloadModule('cc'); } catch (x) {}   // no automatic subtitles
+        // autoplay starts it; only when it hasn't after a moment, a nudge (each extra one flashes YouTube's pause button).
+        setTimeout(function () { if (player.getPlayerState() !== 1 && player.getPlayerState() !== 3) player.playVideo(); }, 2500);
+      },
+      onStateChange: function (e) {
+        if (e.data === 1 && !revealing) {
+          revealing = true;
+          // Hidden, it crawls (a quarter of its speed): those seconds take little of it. No seeking back: YouTube shows
+          // its pause button again after every seek.
+          try { player.setPlaybackRate(0.25); } catch (x) {}
+          setTimeout(function () {
+            try { player.setPlaybackRate(1); } catch (x) {}
+            player.unMute();
+            player.setVolume(100);
+            // A browser that pauses it once it's unmuted without a key pressed: muted, then, rather than stopped.
+            setTimeout(function () { if (player.getPlayerState() !== 1) { player.mute(); player.playVideo(); } }, 800);
+            tell('playing');
+          }, REVEAL);
+        } else if (e.data === 0) tell('ended');
+      },
+      onError: function () { tell('error'); },
+      // A TV that won't start it with sound: muted, rather than not at all.
+      onAutoplayBlocked: function () { player.mute(); player.playVideo(); }
+    }
+  });
+}
+
+window.addEventListener('message', function (e) {
+  var cmd = e.data && e.data.cmd;
+  if (!player || !player.getPlayerState) return;
+  if (cmd === 'toggle') { if (player.getPlayerState() === 1) player.pauseVideo(); else player.playVideo(); }
+  else if (cmd === 'stop') player.stopVideo();
+});
+</script>
+</body>
+</html>
